@@ -8,18 +8,27 @@ use Date::Parse;
 
 $now = time();
 
-# Best if run in under watch 
-# watch -pn 60 ./catcoin-watch.pl
+# TODO Fix formating for My Pool section
+# TODO Change to run in loop without having to need watch
 
-$api = 'apikey';
-$uid = 'uid';
-$mypool = 'teamcatcoin.com';
+# Best if run in under watch 
+# watch -pn 60 "perl catcoin-watch.pl"
+
+# If not in any one pool, then leave @mypool as ()
+# If you would like to see detailed stats of more then one pool, 
+# make sure you put iny your api, uid, and, site FQDN in order, space delmited
+# If you are in a P2Pool, put your CAT mining address in $p2pooladdr
+
+@api = qw(apikey);
+@uid = qw(uid);
+@mypool = qw();
 $p2paddr = 'CATaddr';
 
 $ua = new LWP::UserAgent;
 $ua->agent('Statchecker/0.01 ');
-@otherpools = qw(cat.coinium.org catpool.in cat.hashfaster.com cat.mintpool.co cat.cryptovalley.com);
-@p2pools = qw(p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993 minbar.hozed.org:9927);
+@otherpools = qw(cat.coinium.org teamcatcoin.com catpool.in cat.hashfaster.com cat.mintpool.co cat.cryptovalley.com);
+@p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993);
+$mypoolcnt = @mypool;
 
 # Wallet Info
 $catmine = readpipe('catcoind getmininginfo'); 
@@ -29,52 +38,64 @@ $catinfod = decode_json $catinfo;
 $nethash = $catmined->{'networkhashps'} / 1000;
 $catpeers = readpipe('catcoind getpeerinfo');
 $catpeers = decode_json $catpeers;
+$myacttx = readpipe('catcoind listtransactions');
+$myacttx = decode_json $myacttx;
+$mytxcnt = @{ $myacttx };
 
-# TeamCatcoin data
-$catpoolbreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getdashboarddata&api_key=$api&id=$uid");
-$catpoolbrep = $ua->request($catpoolbreq);
-if ( $catpoolbrep->code == 503) {
-    sleep(3);
+$myimmtotal = 0;
+for ($i=0; $i<$mytxcnt; $i++) {
+    if ( $myacttx->[$i]{'category'} eq 'immature' ) {
+        $myimmtotal += $myacttx->[$i]{'amount'};
+    };
+};
+
+# MyPool data
+for ($i=0; $i<$mypoolcnt; $i++) {
+    $catpoolbreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getdashboarddata&api_key=$api&id=$uid");
     $catpoolbrep = $ua->request($catpoolbreq);
-}
-elsif ( $catpoolbrep->code == 200 ) {
-    $catpoolbinfo = $catpoolbrep->content;
-    $catpoolbinfo = decode_json $catpoolbinfo;
-    $catpoolbinfo = $catpoolbinfo->{'getdashboarddata'}{'data'};
-} 
-else {
-    $catpoolbinfo = 'N/A';
+    if ( $catpoolbrep->code == 503) {
+        sleep(3);
+        $catpoolbrep = $ua->request($catpoolbreq);
+    }
+    elsif ( $catpoolbrep->code == 200 ) {
+        $catpoolbinfo = $catpoolbrep->content;
+        $catpoolbinfo = decode_json $catpoolbinfo;
+        $catpoolbinfo = $catpoolbinfo->{'getdashboarddata'}{'data'};
+    } 
+    else {
+        $catpoolbinfo = 'N/A';
+    };
+    
+    sleep(1);
+    $catpoolsreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getpoolstatus&api_key=$api&id=$uid");
+    $catpoolsrep = $ua->request($catpoolsreq);
+    if ( $catpoolsrep->code == 200 ) {
+        $catpoolsinfo = $catpoolsrep->content;
+        $catpoolsinfo = decode_json $catpoolsinfo;
+        $catpoolsinfo = $catpoolsinfo->{'getpoolstatus'}{'data'};
+    }
+    else {
+        $catpoolsinfo = 'N/A';
+    };
+    
+    sleep(1);
+    
+    $catpoolfreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getblocksfound&api_key=$api&id=$uid");
+    $catpoolfrep = $ua->request($catpoolfreq);
+    if ( $catpoolfrep->code == 200 ) {
+        $catpoolfinfo = $catpoolfrep->content;
+        $catpoolfinfo = decode_json $catpoolfinfo;
+        $catpoolfinfo = $catpoolfinfo->{'getblocksfound'}{'data'};
+    }
+    else {
+        $catpoolfinfo = 'N/A';
+    };
+
+
+    $cplastblock = &timeformat($catpoolsinfo->{'timesincelast'});
+    #$cproundest = sprintf("%.3f", $catpoolbinfo->{'personal'}{'shares'}{'valid'} / $catpoolbinfo->{'pool'}{'shares'}{'valid'} * 48);
+    $cppcent = sprintf("%.3f",$catpoolsinfo->{'hashrate'} / $nethash * 100);
 };
-
-sleep(1);
-$catpoolsreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getpoolstatus&api_key=$api&id=$uid");
-$catpoolsrep = $ua->request($catpoolsreq);
-if ( $catpoolsrep->code == 200 ) {
-    $catpoolsinfo = $catpoolsrep->content;
-    $catpoolsinfo = decode_json $catpoolsinfo;
-    $catpoolsinfo = $catpoolsinfo->{'getpoolstatus'}{'data'};
-}
-else {
-    $catpoolsinfo = 'N/A';
-};
-
-sleep(1);
-
-$catpoolfreq = new HTTP::Request('GET', "http://$mypool/index.php?page=api&action=getblocksfound&api_key=$api&id=$uid");
-$catpoolfrep = $ua->request($catpoolfreq);
-if ( $catpoolfrep->code == 200 ) {
-    $catpoolfinfo = $catpoolfrep->content;
-    $catpoolfinfo = decode_json $catpoolfinfo;
-    $catpoolfinfo = $catpoolfinfo->{'getblocksfound'}{'data'};
-}
-else {
-    $catpoolfinfo = 'N/A';
-};
-
-
-$cplastblock = &timeformat($catpoolsinfo->{'timesincelast'});
-#$cproundest = sprintf("%.3f", $catpoolbinfo->{'personal'}{'shares'}{'valid'} / $catpoolbinfo->{'pool'}{'shares'}{'valid'} * 48);
-$cppcent = sprintf("%.3f",$catpoolsinfo->{'hashrate'} / $nethash * 100);
 
 # Other Pools data
 @pooldata = ();
@@ -143,7 +164,7 @@ if ( $p2poolbrep->code == 200 ) {
     $p2poolbinfo = decode_json $p2poolbinfo;
     $p2poolbtime = $p2poolbinfo->[0]{'ts'};
     $p2poolbhash = $p2poolbinfo->[0]{'hash'};
-    $p2pblockinfo = readpipe("catcoind getblock $p2poolbhash");
+    $p2pblockinfo = readpipe("catcoind getblock $p2poolbhash 2> /dev/null");
     if ( $p2pblockinfo =~ /Block not/ && defined $p2poolbhash ) {
         $p2pblockinfo = decode_json $p2pblockinfo;
         $p2pblock = $p2pblockinfo->{'height'};
@@ -173,7 +194,11 @@ $p2ppayoutrep = $ua->request($p2ppayoutreq);
 if ( $p2ppayoutrep->code == 200 ) {
     $p2ppayoutinfo = $p2ppayoutrep->content;
     $p2ppayoutinfo = decode_json $p2ppayoutinfo;
-    $p2ppayout = $p2ppayoutinfo->{$p2paddr};
+    if ( $p2paddr ne '' ) {
+        $p2ppayout = $p2ppayoutinfo->{$p2paddr};
+    }
+    else {
+        $p2ppayout = "N/A"}
 }
 else {
     $p2ppayout = "Not Avail.";
@@ -199,7 +224,7 @@ for ($t=0; $t<$catinfod->{'connections'}; $t++) {
         $catinbound++;
     };
 };
-$peertotal = $t;
+$peertotal = $catinfod->{'connections'};
 
 # Setup varibles for printing
 @mypoolinfo = ('Last Block:', 'Round Time:', 'Round est.:', 'Balance:', 'My Hashrate:', 'Pool Hashrate:', 'Hash %:', 'Workers:');
@@ -237,6 +262,9 @@ $p2ptotal = 0;
 for ($i=0; $i<$p2poolcnt; $i++) {
     $name = $p2pools[$i];
     $name =~ s/:.*//;
+    $name =~ s/minbar\.//;
+    $name =~ s/p2pool\.catstat\.info/catstat.info/;
+    $name =~ s/thepeeps\.net/thepeeps/;
     $p2pname .= sprintf($format2,$name);
     $p2ppeers .= sprintf($format2,"In: ".${p2pooldata[$i]}->{'peers'}{'incoming'}." Out: ".${p2pooldata[$i]}->{'peers'}{'incoming'});
     $p2plhash .= sprintf($format2,(sprintf("%.3f",$p2poolhash[$i] / 1000000)." MH/s"));
@@ -255,17 +283,18 @@ else {
 };
 
 # Print info.
-print "Pools that I'm in\n";
-printf "$format $format3 $format4 $format4 $format4\n","Statistic","TeamCatcoin.com","Block","Confirms","Finder";
-printf "$format $format3 %s\n",$mypoolinfo[0],$catpoolsinfo->{'lastblock'},$blockinfo[0];
-printf "$format $format3 %s\n",$mypoolinfo[1],$cplastblock,$blockinfo[1];
-printf "$format $format3 %s\n",$mypoolinfo[2],sprintf("%.3f",$catpoolbinfo->{'personal'}{'estimates'}{'payout'}),$blockinfo[2];
-printf "$format $format3 %s\n",$mypoolinfo[3],'C: '.sprintf("%.3f",$catpoolbinfo->{'personal'}{'balance'}{'confirmed'}).' U: '.sprintf("%.3f",$catpoolbinfo->{'personal'}{'balance'}{'unconfirmed'}),,$blockinfo[3];
-printf "$format $format3 %s\n",$mypoolinfo[4],$catpoolbinfo->{'personal'}{'hashrate'}." KH/s",$blockinfo[4];
-printf "$format $format3 %s\n",$mypoolinfo[5],sprintf("%.3f", $catpoolsinfo->{'hashrate'} / 1000)." MH/s",$blockinfo[5];
-printf "$format $format3 %s\n",$mypoolinfo[6],"$cppcent%",$blockinfo[6];
-printf "$format $format3 %s\n",$mypoolinfo[7],$catpoolsinfo->{'workers'},$blockinfo[7];
-
+if ( $mypoolcnt > 0 ) {
+    print "Pools that I'm in\n";
+    printf "$format $format3 $format4 $format4 $format4\n","Stats for:",$catpoolsinfo->{'pool_name'},"Block","Confirms","Finder";
+    printf "$format $format3 %s\n",$mypoolinfo[0],$catpoolsinfo->{'lastblock'},$blockinfo[0];
+    printf "$format $format3 %s\n",$mypoolinfo[1],$cplastblock,$blockinfo[1];
+    printf "$format $format3 %s\n",$mypoolinfo[2],sprintf("%.3f",$catpoolbinfo->{'personal'}{'estimates'}{'payout'}),$blockinfo[2];
+    printf "$format $format3 %s\n",$mypoolinfo[3],'C: '.sprintf("%.3f",$catpoolbinfo->{'personal'}{'balance'}{'confirmed'}).' U: '.sprintf("%.3f",$catpoolbinfo->{'personal'}{'balance'}{'unconfirmed'}),,$blockinfo[3];
+    printf "$format $format3 %s\n",$mypoolinfo[4],$catpoolbinfo->{'personal'}{'hashrate'}." KH/s",$blockinfo[4];
+    printf "$format $format3 %s\n",$mypoolinfo[5],sprintf("%.3f", $catpoolsinfo->{'hashrate'} / 1000)." MH/s",$blockinfo[5];
+    printf "$format $format3 %s\n",$mypoolinfo[6],"$cppcent%",$blockinfo[6];
+    printf "$format $format3 %s\n",$mypoolinfo[7],$catpoolsinfo->{'workers'},$blockinfo[7];
+};
 print "\nOther Pool info\n";
 printf "%-12s %s $format\n",$otherpoolinfo[0],$othername,"CoinEx";
 printf "%-12s %s $format\n",$otherpoolinfo[1],$otherblock,"$coinexago";
@@ -273,7 +302,7 @@ printf "%-12s %s $format\n",$otherpoolinfo[2],$otherhash,($coinexinfo->[0]{'hash
 printf "%-12s %s $format\n",$otherpoolinfo[3],$otherpcent,$coinexpcent.'%';
 printf "%-12s %s $format\n",$otherpoolinfo[4],$otherworker,"N/A";
 
-print "\nP2Pool info\n";
+print "\nP2Pool local info\n";
 printf "%-12s %s\n",$p2pooltype[0],$p2pname;
 printf "%-12s %s\n",$p2pooltype[1],$p2ppeers;
 printf "%-12s %s\n",$p2pooltype[2],$p2plhash;
@@ -286,7 +315,7 @@ printf "%-12s %s\n","Round Time:",$p2pblocktime;
 printf "%-12s %s\n","Payout:",$p2ppayout;
 
 print "\nMy Wallet info\n";
-print "Balance:       ".$catinfod->{'balance'}." CAT\n\n";
+print "Balance:       ".$catinfod->{'balance'}." CAT   Immature: $myimmtotal CAT\n\n";
 
 print "Network info\n";
 print "Connections:   $peertotal (IN: $catinbound, OUT: $catoutbound)\n";
@@ -297,10 +326,11 @@ print "Block Tx:      ".$catmined->{'currentblocktx'}."\n";
 print 'Difficulty:    '.$catmined->{'difficulty'}."\n";
 print 'Hashrate:      '.sprintf("%.3f", $catmined->{'networkhashps'} / 1000000)." MH/s\n";
 print 'Pcent watched: '.($ototal + $p2ptotal + $cppcent + $coinexpcent)."%\n";
-#print Dumper($catmined);
 
 
+####################################################################
 
+# sub-routine for formating time durations.
 sub timeformat($) {
     my $rawtime = shift;
     my $time = duration($rawtime,4);
