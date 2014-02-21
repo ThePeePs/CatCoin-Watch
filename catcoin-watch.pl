@@ -5,6 +5,8 @@ use JSON;
 use LWP;
 use Time::Duration;
 use Date::Parse;
+use URI;
+use Web::Scraper;
 
 $now = time();
 
@@ -16,7 +18,7 @@ $now = time();
 
 # If not in any one pool, then leave @mypool as ()
 # If you would like to see detailed stats of more then one pool, 
-# make sure you put iny your api, uid, and, site FQDN in order, space delmited
+# make sure you put iny your api, uid, and, site FQDN in order, space delimited
 # If you are in a P2Pool, put your CAT mining address in $p2pooladdr
 
 @api = qw(apikey);
@@ -24,11 +26,14 @@ $now = time();
 @mypool = qw();
 $p2paddr = 'CATaddr';
 
-$ua = new LWP::UserAgent;
-$ua->agent('Statchecker/0.01 ');
 @otherpools = qw(cat.coinium.org teamcatcoin.com catpool.in cat.hashfaster.com cat.mintpool.co cat.cryptovalley.com);
 @p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993);
+$cwurl = 'http://www.coinwarz.com/cryptocurrency/?sha256Check=true&scryptCheck=true';
+
 $mypoolcnt = @mypool;
+
+$ua = new LWP::UserAgent;
+$ua->agent('Statchecker/0.01 ');
 
 # Wallet Info
 $catmine = readpipe('catcoind getmininginfo'); 
@@ -204,6 +209,29 @@ else {
     $p2ppayout = "Not Avail.";
 };
 
+# Get Rank from CoinWarz
+$cwpagereq = new HTTP::Request('GET',$cwurl);
+$cwpagerep = $ua->request($cwpagereq, "cwpage.html");
+if ( $cwpagerep->code == 200 ) {
+    $links = scraper {
+        process '//table[@id="tblCoins"]/tbody/tr', "coins[]" => scraper {
+            process 'a', name => 'text';
+        };
+    };
+    $res = $links->scrape( URI->new("file:cwpage.html") );
+
+    $i = 1;
+    for $coin (@{$res->{coins}}) {
+        if ( $coin->{name} =~ /CAT/ ) {
+            $cwrank = $i;
+        };
+        $i++;
+    };
+}
+else {
+    $cwrank = "N/A";
+};
+
 # Get Block age
 $current = readpipe('catcoind getbestblockhash');
 $currentbinfo = readpipe("catcoind getblock $current");
@@ -295,29 +323,32 @@ if ( $mypoolcnt > 0 ) {
     printf "$format $format3 %s\n",$mypoolinfo[6],"$cppcent%",$blockinfo[6];
     printf "$format $format3 %s\n",$mypoolinfo[7],$catpoolsinfo->{'workers'},$blockinfo[7];
 };
-print "\nOther Pool info\n";
+print "\nOther Pool Info\n";
 printf "%-12s %s $format\n",$otherpoolinfo[0],$othername,"CoinEx";
 printf "%-12s %s $format\n",$otherpoolinfo[1],$otherblock,"$coinexago";
 printf "%-12s %s $format\n",$otherpoolinfo[2],$otherhash,($coinexinfo->[0]{'hashrate'} / 1000)." MH/s";
 printf "%-12s %s $format\n",$otherpoolinfo[3],$otherpcent,$coinexpcent.'%';
 printf "%-12s %s $format\n",$otherpoolinfo[4],$otherworker,"N/A";
 
-print "\nP2Pool local info\n";
+print "\nP2Pool local Info\n";
 printf "%-12s %s\n",$p2pooltype[0],$p2pname;
 printf "%-12s %s\n",$p2pooltype[1],$p2ppeers;
 printf "%-12s %s\n",$p2pooltype[2],$p2plhash;
 printf "%-12s %s\n",$p2pooltype[3],$p2pnpcent;
 printf "%-12s %s\n",$p2pooltype[4],$p2pgpcent;
-print "\nP2Pool Global info\n";
+print "\nP2Pool Global Info\n";
 printf "%-12s %s\n","Global Hash:",sprintf("%.3f", ($p2poolginfo->{'pool_hash_rate'} / 1000000))." MH/s (".sprintf("%.3f",($p2poolginfo->{'pool_hash_rate'} / $catmined->{'networkhashps'} * 100)).'%)';
 printf "%-12s %s\n","Last Block:",$p2pblock;
 printf "%-12s %s\n","Round Time:",$p2pblocktime;
 printf "%-12s %s\n","Payout:",$p2ppayout;
 
-print "\nMy Wallet info\n";
+print "\nCoinWarz Info\n";
+print "Rank: $cwrank\n";
+
+print "\nMy Wallet Info\n";
 print "Balance:       ".$catinfod->{'balance'}." CAT   Immature: $myimmtotal CAT\n\n";
 
-print "Network info\n";
+print "Network Info\n";
 print "Connections:   $peertotal (IN: $catinbound, OUT: $catoutbound)\n";
 print "Current Block: ".$catmined->{'blocks'}.", Next: ".($catmined->{'blocks'} + 1)."\n";
 print "Block Age:     $blockage\n";
