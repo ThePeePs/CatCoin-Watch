@@ -26,7 +26,7 @@ $now = time();
 $p2paddr = 'CATaddr';
 
 @otherpools = qw(cat.coinium.org www.mining-pool.co.uk/cat-catcoin cat.mintpool.co);
-@p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 198.23.248.246:9927 p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993);
+@p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 198.23.248.246:9927 p2pool.name:9333 p2pool.org:9999 cat.e-pool.net:9993);
 $cwurl = 'http://www.coinwarz.com/cryptocurrency/?sha256Check=true&scryptCheck=true';
 
 $mypoolcnt = @mypool;
