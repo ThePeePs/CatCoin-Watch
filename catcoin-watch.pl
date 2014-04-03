@@ -5,7 +5,6 @@ use JSON;
 use LWP;
 use Time::Duration;
 use Date::Parse;
-use URI;
 use Web::Scraper;
 
 $now = time();
@@ -26,8 +25,8 @@ $now = time();
 @mypool = qw();
 $p2paddr = 'CATaddr';
 
-@otherpools = qw(cat.coinium.org teamcatcoin.com catpool.in cat.hashfaster.com cat.mintpool.co cat.cryptovalley.com);
-@p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993);
+@otherpools = qw(cat.coinium.org www.mining-pool.co.uk/cat-catcoin cat.mintpool.co);
+@p2pools = qw(p2pool.catstat.info:9927 minbar.hozed.org:9927 p2pool.thepeeps.net:9333 198.23.248.246:9927 p2pool.name:9333 solidpool.org:9333 p2pool.org:9999 cat.e-pool.net:9993);
 $cwurl = 'http://www.coinwarz.com/cryptocurrency/?sha256Check=true&scryptCheck=true';
 
 $mypoolcnt = @mypool;
@@ -47,6 +46,7 @@ $myacttx = readpipe('catcoind listtransactions');
 $myacttx = decode_json $myacttx;
 $mytxcnt = @{ $myacttx };
 
+$mybal = $catinfod->{'balance'};
 $myimmtotal = 0;
 for ($i=0; $i<$mytxcnt; $i++) {
     if ( $myacttx->[$i]{'category'} eq 'immature' ) {
@@ -115,6 +115,15 @@ for($i=0; $i<$othercnt; $i++) {
     };
 };
 
+
+# GeekHash data
+$ghreq = new HTTP::Request('GET', 'http://geekhash.org/api/');
+$ghrep = $ua->request($ghreq);
+if ( $ghrep->code == 200 ) {
+    $ghinfo = $ghrep->content;
+    $ghinfo = decode_json $ghinfo;
+};
+
 # CoinEx data
 $coinexreq = new HTTP::Request('GET','https://coinex.pw/api/v2/currencies?name=CAT');
 $coinexrep = $ua->request($coinexreq);
@@ -123,11 +132,12 @@ if ( $coinexrep->code == 200 ) {
     $coinexinfo = decode_json $coinexinfo;
     $coinexinfo = $coinexinfo->{'currencies'};
     $coinexlastblk = $coinexinfo->[0]{'last_block_at'};
-    #$coinexlastblk =~ s/T/ /;
-    #$coinexlastblk =~ s/\.\d+Z/ UTC/;
     $coinexdte = str2time($coinexlastblk);
     $coinexdte -= $now;
     $coinexago = &timeformat($coinexdte);
+}
+else {
+    $coinexago = $coinexrep->code;
 };
 
 # P2Pools data
@@ -211,25 +221,36 @@ else {
 
 # Get Rank from CoinWarz
 $cwpagereq = new HTTP::Request('GET',$cwurl);
-$cwpagerep = $ua->request($cwpagereq, "cwpage.html");
+$cwpagerep = $ua->request($cwpagereq);
 if ( $cwpagerep->code == 200 ) {
+    $cwcontent = $cwpagerep->content;
     $links = scraper {
+        process '/html/body/div/div[2]/span[2]', btcprice => 'text';
         process '//table[@id="tblCoins"]/tbody/tr', "coins[]" => scraper {
+            process '//td[4]/div[2]/a', price => 'text';
             process 'a', name => 'text';
+            process '//div/div[2]/div[2]/div[1]', hash => 'text';
+            process '//div/div[2]/div[2]/div[3]', block => 'text';
         };
     };
-    $res = $links->scrape( URI->new("file:cwpage.html") );
+    $res = $links->scrape($cwcontent);
 
     $i = 1;
     for $coin (@{$res->{coins}}) {
-        if ( $coin->{name} =~ /CAT/ ) {
+    if ( $coin->{name} =~ /CAT/ ) {
             $cwrank = $i;
-        };
-        $i++;
+            $cwexrate = $coin->{price};
+            @cwhash = split(/:/, $coin->{hash});
+            @cwblock = split(/:/, $coin->{block});
+            };
+    $i++;
     };
 }
 else {
     $cwrank = "N/A";
+    $cwexrate = "N/A";
+    @cwhash = (undef, "N/A");
+    @cwblock = (undef, "N/A");
 };
 
 # Get Block age
@@ -268,6 +289,8 @@ $ototal = 0;
 for ($i=0; $i<8; $i++) {
     $blockinfo[$i] = sprintf("$format4 $format4  $format4",$catpoolfinfo->[$i]{'height'},(35 - $catpoolfinfo->[$i]{'confirmations'}),$catpoolfinfo->[$i]{'finder'});
 };
+
+# Formating for Other Pools
 for ($i=0; $i<$othercnt; $i++) {
     $name = ${pooldata[$i]}->{'pool_name'};
     $name =~ s/CAT Pool @ //;
@@ -277,6 +300,8 @@ for ($i=0; $i<$othercnt; $i++) {
     $name =~ s/The Catcoin//;
     $name =~ s/ - //;
     $name =~ s/\.com//;
+    $name =~ s/\.co\.uk//;
+    $name =~ s/CATPOOL/CatPool/;
     $pcent = sprintf("%.3f",${pooldata[$i]}->{'hashrate'} / $nethash * 100);
     $ototal += $pcent;
     $othername .= sprintf($format,$name);
@@ -286,20 +311,47 @@ for ($i=0; $i<$othercnt; $i++) {
     $otherblock .= sprintf($format,${pooldata[$i]}->{'last_block'});
 };
 
+# GH formating.
+$othername .= sprintf($format,"GeekHash");
+$otherhash .= sprintf($format,$ghinfo->{'hashrate'}{'cathashrate'});
+($ghhash,undef) = split(/ /, $ghinfo->{'hashrate'}{'cathashrate'});
+$ghpcent = sprintf("%.3f",($ghhash * 1000) / $nethash * 100);
+$ototal += $ghpcent;
+$otherpcent .= sprintf($format,"$ghpcent%");
+$otherworker .= sprintf($format,$ghinfo->{'workers'}{'catworkers'});
+$otherblock .= sprintf($format,$ghinfo->{'blocks'}{'catblock'});
+
+# CoinEx info Formating.
+$othername .= sprintf($format,"CoinEx");
+$otherhash .= sprintf($format,($coinexinfo->[0]{'hashrate'} / 1000)." MH/s");
+$coinexpcent = sprintf("%.3f",($coinexinfo->[0]{'hashrate'} / ($catmined->{'networkhashps'} / 1000)) * 100);
+$ototal += $coinexpcent;
+$otherpcent .= sprintf($format,"$coinexpcent%");
+$otherworker .= sprintf($format,'N/A');
+$otherblock .= sprintf($format,$coinexago);
+
+if ( defined $coinexdte) {
+    $coinexdur = &timeformat($coinexdte);
+}
+else {
+    $coinexdur = 'N/A';
+};
+
 $p2ptotal = 0;
 for ($i=0; $i<$p2poolcnt; $i++) {
     $name = $p2pools[$i];
     $name =~ s/:.*//;
     $name =~ s/minbar\.//;
     $name =~ s/p2pool\.catstat\.info/catstat.info/;
-    $name =~ s/thepeeps\.net/thepeeps/;
+    $name =~ s/p2pool\.thepeeps/thepeeps/;
+    $name =~ s/198\.23\.248\.246/SlimePuppy/;
     $p2pname .= sprintf($format2,$name);
     $p2ppeers .= sprintf($format2,"In: ".${p2pooldata[$i]}->{'peers'}{'incoming'}." Out: ".${p2pooldata[$i]}->{'peers'}{'incoming'});
     $p2plhash .= sprintf($format2,(sprintf("%.3f",$p2poolhash[$i] / 1000000)." MH/s"));
-    $pcent = sprintf("%.3f",(${p2poolhash[$i]} / $catmined->{'networkhashps'} * 100));
+    $pcent = sprintf("%6.3f",(${p2poolhash[$i]} / $catmined->{'networkhashps'} * 100));
     $p2ptotal += $pcent;
     $p2pgpcent .= sprintf($format2,"$pcent%");
-    $p2pnpcent .= sprintf($format2,(sprintf("%.3f",($p2poolhash[$i] / $p2poolginfo->{'pool_hash_rate'} * 100))).'%');
+    $p2pnpcent .= sprintf($format2,(sprintf("%6.3f",($p2poolhash[$i] / $p2poolginfo->{'pool_hash_rate'} * 100))).'%');
 };
 
 $coinexpcent = sprintf("%.3f",($coinexinfo->[0]{'hashrate'} / ($catmined->{'networkhashps'} / 1000)) * 100);
@@ -324,11 +376,11 @@ if ( $mypoolcnt > 0 ) {
     printf "$format $format3 %s\n",$mypoolinfo[7],$catpoolsinfo->{'workers'},$blockinfo[7];
 };
 print "\nOther Pool Info\n";
-printf "%-12s %s $format\n",$otherpoolinfo[0],$othername,"CoinEx";
-printf "%-12s %s $format\n",$otherpoolinfo[1],$otherblock,"$coinexago";
-printf "%-12s %s $format\n",$otherpoolinfo[2],$otherhash,($coinexinfo->[0]{'hashrate'} / 1000)." MH/s";
-printf "%-12s %s $format\n",$otherpoolinfo[3],$otherpcent,$coinexpcent.'%';
-printf "%-12s %s $format\n",$otherpoolinfo[4],$otherworker,"N/A";
+printf "%-12s %s\n",$otherpoolinfo[0],$othername;
+printf "%-12s %s\n",$otherpoolinfo[1],$otherblock;
+printf "%-12s %s\n",$otherpoolinfo[2],$otherhash;
+printf "%-12s %s\n",$otherpoolinfo[3],$otherpcent;
+printf "%-12s %s\n",$otherpoolinfo[4],$otherworker;
 
 print "\nP2Pool local Info\n";
 printf "%-12s %s\n",$p2pooltype[0],$p2pname;
@@ -343,10 +395,17 @@ printf "%-12s %s\n","Round Time:",$p2pblocktime;
 printf "%-12s %s\n","Payout:",$p2ppayout;
 
 print "\nCoinWarz Info\n";
-print "Rank: $cwrank\n";
+print "Rank:   $cwrank\n";
+print "Hash:  ${cwhash[1]}\n";
+print "Block: ${cwblock[1]}\n";
+$btc = $res->{btcprice};
+$btc =~ s/\$//;
+print "BTC\$:   ".$res->{btcprice}."\n";
+print "Price:  \$".sprintf("%.4f",($btc * $cwexrate))."\n";
+print "ExRate: $cwexrate\n";
 
 print "\nMy Wallet Info\n";
-print "Balance:       ".$catinfod->{'balance'}." CAT   Immature: $myimmtotal CAT\n\n";
+print 'My Balance:    '.sprintf("%13.8f",$mybal).' CAT   Immature: '.sprintf("%13.8f",$myimmtotal)." CAT\n";
 
 print "Network Info\n";
 print "Connections:   $peertotal (IN: $catinbound, OUT: $catoutbound)\n";
@@ -356,7 +415,7 @@ print "Block Size:    ".$catmined->{'currentblocksize'}."\n";
 print "Block Tx:      ".$catmined->{'currentblocktx'}."\n";
 print 'Difficulty:    '.$catmined->{'difficulty'}."\n";
 print 'Hashrate:      '.sprintf("%.3f", $catmined->{'networkhashps'} / 1000000)." MH/s\n";
-print 'Pcent watched: '.($ototal + $p2ptotal + $cppcent + $coinexpcent)."%\n";
+print 'Pcent watched: '.($ototal + $p2ptotal + $cppcent)."%\n";
 
 
 ####################################################################
